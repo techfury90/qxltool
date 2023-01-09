@@ -38,14 +38,14 @@
 #endif
 
 #ifdef NEED_U_CHAR
- typedef unsigned char u_char;
+ typedef uint8_t u_char;
 #endif
 
 #ifdef NEED_U_SHORT
- typedef unsigned short u_short;
+ typedef uint16_t u_short;
 #endif
 #ifdef NEED_U_LONG
- typedef unsigned long u_long;
+ typedef uint32_t u_long;
 #endif
 
 #ifdef HAVE_READLINE_READLINE_H
@@ -64,37 +64,37 @@ extern void add_history(char *);
 typedef struct
 {
     char id[4];
-    u_short namlen;
+    uint16_t namlen;
     u_char name[20];
-    u_short dummy0 PACKED;
-    u_short rand;
-    u_short access;
-    u_short dummy1;
-    u_short sectc;
-    u_short dummy2[3];
-    u_short total;
-    u_short free;
-    u_short formatted;
-    u_short dummy3;
-    u_short first;
-    u_short direct;
-    u_long dlen PACKED; 
-    u_short dummy4[3];
-    u_short map[1];
+    uint16_t dummy0 PACKED;
+    uint16_t rand;
+    uint16_t access;
+    uint16_t dummy1;
+    uint16_t sectc;
+    uint16_t dummy2[3];
+    uint16_t total;
+    uint16_t free;
+    uint16_t formatted;
+    uint16_t dummy3;
+    uint16_t first;
+    uint16_t direct;
+    uint32_t dlen PACKED; 
+    uint16_t dummy4[3];
+    uint16_t map[1];
 } HEADER;
 
 typedef struct
 {
-    u_long length;
-    u_short type;
-    u_long data PACKED;
-    u_long  dummy1 PACKED;
-    u_short nlen;
+    uint32_t length;
+    uint16_t type;
+    uint32_t data PACKED;
+    uint32_t  dummy1 PACKED;
+    uint16_t nlen;
     u_char name[QLPATH_MAX];
-    time_t date PACKED;
-    u_short dummy2;
-    u_short map;
-    u_long dummy3;
+    uint32_t date PACKED;
+    uint16_t dummy2;
+    uint16_t map;
+    uint32_t dummy3;
 } QLDIR;
 
 typedef struct 
@@ -104,7 +104,7 @@ typedef struct
         char xtcc[4];
         long x;
     } x;
-    u_long dlen;
+    uint32_t dlen;
 } XTCC;
 
 typedef struct
@@ -130,7 +130,7 @@ typedef struct
 # define offsetof(sname,fname) ((long)&((sname *)0)->fname)
 #endif
 
-typedef int (*PCALLBACK)(QXL *, QLDIR *, void *, void *, u_short);
+typedef int (*PCALLBACK)(QXL *, QLDIR *, void *, void *, uint16_t);
 typedef int (*ACTFUNC)(QXL *, short , char **);
 
 typedef struct
