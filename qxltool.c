@@ -22,7 +22,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 # include <fnmatch.h>
 # define FNMATCH fnmatch
 # define FNEQUAL 0
