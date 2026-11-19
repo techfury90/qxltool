@@ -32,7 +32,7 @@ else
 endif
 
 SRC = qxltool.txt README.QXL qxltool.h qxltool.c Makefile version.h COPYING \
-	INSTALL Makefile.in config.h.in configure.in configure
+	INSTALL Makefile.in config.h.in configure.ac configure
 
 all: domake
 
