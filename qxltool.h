@@ -8,6 +8,10 @@
 #ifndef _QXLTOOL_H
 #define _QXLTOOL_H
 
+#include <stddef.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <time.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include "version.h"
@@ -102,10 +106,17 @@ typedef struct
     union 
     {
         char xtcc[4];
-        long x;
+        int32_t x;
     } x;
     uint32_t dlen;
 } XTCC;
+
+/* On-disk structures must match the QXL.WIN layout exactly */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert (sizeof (QLDIR) == 64, "QLDIR must be 64 bytes");
+_Static_assert (offsetof (HEADER, map) == 64, "HEADER map must be at offset 64");
+_Static_assert (sizeof (XTCC) == 8, "XTCC must be 8 bytes");
+#endif
 
 typedef struct
 {
@@ -130,7 +141,8 @@ typedef struct
 # define offsetof(sname,fname) ((long)&((sname *)0)->fname)
 #endif
 
-typedef int (*PCALLBACK)(QXL *, QLDIR *, void *, void *, uint16_t);
+/* Callbacks may return a pointer (QLDIR *) so must be pointer sized */
+typedef intptr_t (*PCALLBACK)(QXL *, QLDIR *, void *, void *, uint16_t);
 typedef int (*ACTFUNC)(QXL *, short , char **);
 
 typedef struct

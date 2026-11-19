@@ -65,15 +65,15 @@ char *stpcpy (char *s1, char *s2)
 
 
 #ifndef WORDS_BIGENDIAN
-u_short inline swapword (u_short val)
+u_short swapword (u_short val)
 {
     return (u_short) (val << 8) + (val >> 8);
 }
 
-u_long inline swaplong (u_long val)
+uint32_t swaplong (uint32_t val)
 {
-    return (u_long) (((u_long) swapword (val & 0xFFFF) << 16) |
-		     (u_long) swapword (val >> 16));
+    return (uint32_t) (((uint32_t) swapword (val & 0xFFFF) << 16) |
+		       (uint32_t) swapword (val >> 16));
 }
 
 # define SW(a,c) (a)->c = swapword((a)->c)
@@ -84,7 +84,7 @@ u_short swapword (u_short val)
     return val;
 }
 
-u_short swaplong (u_long val)
+uint32_t swaplong (uint32_t val)
 {
     return val;
 }
@@ -240,7 +240,7 @@ static void d_normalise (QLDIR * d)
     SW (d, map);
 }
 
-static int d_list (QXL * qxl, QLDIR * d, void *a, void *pb, u_short c)
+static intptr_t d_list (QXL * qxl, QLDIR * d, void *a, void *pb, u_short c)
 {
     struct tm *tm;
     char s[128];
@@ -271,7 +271,8 @@ static int d_list (QXL * qxl, QLDIR * d, void *a, void *pb, u_short c)
         {
             size_t k;
             
-            tm = localtime (&d->date);
+            time_t t = (time_t) d->date;
+            tm = localtime (&t);
 #if defined (HAVE_STRFTIME)
             k = strftime (s + n, sizeof (s) - n,
                           "%d-%m-%y %H:%M:%S ", tm);
@@ -291,7 +292,7 @@ static int d_list (QXL * qxl, QLDIR * d, void *a, void *pb, u_short c)
         
         if (d->type == 1)
         {
-            sprintf (s + n, "(%ld) ", d->data);
+            sprintf (s + n, "(%" PRIu32 ") ", d->data);
         }
         fputs (s, qxl->fp);
         fputc ('\n', qxl->fp);
@@ -305,7 +306,7 @@ static int d_list (QXL * qxl, QLDIR * d, void *a, void *pb, u_short c)
 # define FNM_CASEFOLD 0
 #endif
 
-static int qfindwild (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
+static intptr_t qfindwild (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
 {
     QLDIR *pd = NULL;
     u_short ft = *(u_short *)pft;
@@ -323,10 +324,10 @@ static int qfindwild (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
 	    *pd = *d;
 	}
     }
-    return (int) pd;
+    return (intptr_t) pd;
 }
 
-static int qfindbest (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
+static intptr_t qfindbest (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
 {
     size_t wlen = strlen (fn);
     u_short ft = *(u_short *)pft;
@@ -343,7 +344,7 @@ static int qfindbest (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
     return 0;
 }
 
-static int qmatch (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
+static intptr_t qmatch (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
 {
     QLDIR *pd = NULL;
     size_t wlen = strlen ((char *)fn);
@@ -358,14 +359,14 @@ static int qmatch (QXL * qxl, QLDIR * d, void *fn, void *pft, u_short flag)
 	    *pd = *d;
 	}
     }
-    return (int) pd;
+    return (intptr_t) pd;
 }
 
-static int processdir (QXL * qxl, QLDIR * buf, QLDIR * cur,
-		       PCALLBACK func, char *fn, void *pft, short flag)
+static intptr_t processdir (QXL * qxl, QLDIR * buf, QLDIR * cur,
+			    PCALLBACK func, char *fn, void *pft, short flag)
 {
     QLDIR *d, *last, *z;
-    int res = 0;
+    intptr_t res = 0;
     last = buf + cur->length / sizeof (QLDIR);
     
     for (d = buf + 1; d < last; d++)
@@ -494,7 +495,7 @@ static int openqxl (QXL * qxl, char *fn)
 static QLDIR *find_file (QXL * qxl, char *fn, u_short ft, QLDIR * cur,
 			 short flag)
 {
-    int res = 0;
+    intptr_t res = 0;
     QLDIR *buf;
     char wanted[40];
     int n;
@@ -1321,7 +1322,7 @@ static int qwrite (QXL * qxl, short mflag, char **av)
 			    rmfile (qxl, d);
 			}
                         ftm = (mflag & QX_ARGV0_IS_FP)
-                            ? (time_t)av[2] : st.st_ctime;
+                            ? (time_t)(uintptr_t)av[2] : st.st_ctime;
                         ftm  += UNIX2QL;
 			makenewfile (qxl, fn1, &ld, fp, ftm);
 		    }
@@ -1772,7 +1773,7 @@ static int qsystem (QXL * qxl, short mflag, char **av)
     return 0;
 }
 
-static int clone_cb (QXL * sqxl, QLDIR * d, void *q, void *pb, u_short c)
+static intptr_t clone_cb (QXL * sqxl, QLDIR * d, void *q, void *pb, u_short c)
 {
     QXL *dqxl = (QXL *)q;
     int flen;
@@ -1817,7 +1818,7 @@ static int clone_cb (QXL * sqxl, QLDIR * d, void *q, void *pb, u_short c)
            qcd(dqxl, 0, &p);
            args[0] = (char *)sqxl->fp;
            args[1] = (char *)d->name + nfn; // cast for c68, alas
-           args[2] = (char *)d->date;
+           args[2] = (char *)(uintptr_t)d->date;
            qwrite(dqxl, (short)QX_ARGV0_IS_FP, args);
         }
     }
