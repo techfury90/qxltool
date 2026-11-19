@@ -1705,20 +1705,22 @@ static int qformat (QXL * qxl, short mflag, char **av)
 	{
 	    static short mbs[] =
 	    {32, 64, 128, 256, 0};
+	    unsigned long req;
 	    u_short ss, bs, ts;
 	    short i;
 
-	    ss = strtoul (size, NULL, 10);
+	    /* Clamp to the supported range before sizing the file, so
+	       the file matches the filesystem written into it */
+	    req = strtoul (size, NULL, 10);
+	    ss = (req < 1) ? 1 : (req > 256) ? 256 : req;
+	    if (ss != req)
+	    {
+		fprintf (stderr, "Size must be 1 to 256 Mb, using %d Mb\n", ss);
+	    }
 
-            lseek(q->fd, (ss << 20), SEEK_SET);
-            lseek(q->fd, 0, SEEK_SET);
 #ifdef HAVE_FTRUNCATE
-            ftruncate(q->fd, (ss << 20));
+            ftruncate(q->fd, (off_t) ss << 20);
 #endif
-            if (ss < 1)
-		ss = 1;
-	    if (ss > 256)
-		ss = 256;
 	    for (i = 0; mbs[i]; i++)
 	    {
 		if (ss <= mbs[i])
