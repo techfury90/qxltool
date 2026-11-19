@@ -160,14 +160,14 @@ static char *lastdir (char *ws)
 
 #endif
 
-static u_char *strim (u_char *s)
+static char *strim (char *s)
 {
-    u_char *p;
+    char *p;
     short n;
 
     n = strlen (s);
     p = s + n;
-    while (*--p <= ' ' && n--)
+    while ((u_char) *--p <= ' ' && n--)
     {
 	*p = '\0';
     }
@@ -1776,7 +1776,6 @@ static int qsystem (QXL * qxl, short mflag, char **av)
 static intptr_t clone_cb (QXL * sqxl, QLDIR * d, void *q, void *pb, u_short c)
 {
     QXL *dqxl = (QXL *)q;
-    int flen;
     char *sd, *dd;
     int nsd;
     char df[128];
@@ -1795,7 +1794,6 @@ static intptr_t clone_cb (QXL * sqxl, QLDIR * d, void *q, void *pb, u_short c)
             strcat(df, "_");
         }
         
-        flen = d->length - sizeof (QLDIR);
         if(d->type == 0xff)
         {
             qcd(dqxl, 0, NULL);
@@ -2133,7 +2131,7 @@ int main (int ac, char **av)
     if ((openqxl (qxl, fn)) != -1)
     {
 	char cmd[LINSIZ];
-	u_char *pcmd, *ptr;
+	char *pcmd, *ptr;
 
 	while (1)
 	{
@@ -2164,7 +2162,7 @@ int main (int ac, char **av)
 		if (memcmp (ptr, j->name, n) == 0)
 		{
 		    strim (ptr);
-		    while (*(ptr + n) > ' ')
+		    while ((u_char) *(ptr + n) > ' ')
 			n++;
 		    n += strspn (ptr + n, "\t ");
 		    if (qxl->fd <= 0 && j->flag & QX_OPEN)
