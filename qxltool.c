@@ -1726,7 +1726,13 @@ static int qformat (QXL * qxl, short mflag, char **av)
 	    }
 
             bs = (1 << i);
-	    ts = (ss << 20) / (bs<<9);
+	    {
+		/* The header holds the cluster count in 16 bits, so sizes
+		   on a cluster size boundary (32/64/128/256 Mb) would give
+		   65536 and wrap to 0. Drop the last cluster instead. */
+		unsigned long nts = ((unsigned long) ss << 20) / (bs << 9);
+		ts = (nts > 0xFFFF) ? 0xFFFF : nts;
+	    }
 	    bs <<= 9;
             q->mode = fmode;
 	    init (q, label, bs, ts);
