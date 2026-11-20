@@ -3597,31 +3597,13 @@ ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
-{ printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for ../qxltool.c" >&5
-printf %s "checking for ../qxltool.c... " >&6; }
-if test ${ac_cv_file____qxltool_c+y}
-then :
-  printf %s "(cached) " >&6
-else case e in #(
-  e) test "$cross_compiling" = yes &&
-  as_fn_error $? "cannot check for file existence when cross compiling" "$LINENO" 5
-if test -r "../qxltool.c"; then
-  ac_cv_file____qxltool_c=yes
-else
-  ac_cv_file____qxltool_c=no
-fi ;;
-esac
-fi
-{ printf '%s\n' "$as_me:${as_lineno-$LINENO}: result: $ac_cv_file____qxltool_c" >&5
-printf '%s\n' "$ac_cv_file____qxltool_c" >&6; }
-if test "x$ac_cv_file____qxltool_c" = xyes
+if test -f ../qxltool.c
 then :
 
 else case e in #(
   e) as_fn_error $? "You must run this in the Unix or NT sub-directory" "$LINENO" 5 ;;
 esac
 fi
-
 
 
 { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for library containing floor" >&5

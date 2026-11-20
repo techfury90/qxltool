@@ -7,7 +7,9 @@ AC_CONFIG_HEADERS([config.h])
 
 AC_PROG_CC
 
-AC_CHECK_FILE([../qxltool.c],,
+dnl Plain test rather than AC_CHECK_FILE, which refuses to run when cross
+dnl compiling (e.g. building the NT version with mingw)
+AS_IF([test -f ../qxltool.c], [],
 	[AC_MSG_ERROR([You must run this in the Unix or NT sub-directory])])
 
 dnl Checks for libraries.
