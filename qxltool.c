@@ -46,6 +46,8 @@
 # error "Unknown system type"
 #endif
 
+#include <zlib.h>
+
 #include "qxltool.h"
 
 #define LINSIZ (256)
@@ -982,7 +984,12 @@ static int qinfo (QXL * qxl, short mflag, char **p)
     return 0;
 }
 
-static void makenewfile (QXL * qxl, char *fn1, QLDIR * ld, FILE * fp, time_t ftim)
+/* Create fn1 in directory ld. If fp is NULL a directory is made,
+   otherwise flen bytes (or the whole file if flen < 0) are copied from
+   fp. A non zero dspace gives the data space of an executable, otherwise
+   it is taken from an XTcc trailer (or the QDOS file header) */
+static void makenewfile (QXL * qxl, char *fn1, QLDIR * ld, FILE * fp,
+                         time_t ftim, long flen, uint32_t dspace)
 {
 
     QLDIR *e, *f;
@@ -1022,27 +1029,37 @@ static void makenewfile (QXL * qxl, char *fn1, QLDIR * ld, FILE * fp, time_t fti
     if (fp)
     {
 	int ilen, off, nr;
-#ifndef __QDOS__
-	XTCC xtcc;
-	fseek (fp, -8, SEEK_END);
-	fread (&xtcc, 1, 8, fp);
-	if (memcmp (xtcc.x.xtcc, "XTcc", 4) == 0)
+	long rem = flen;
+
+	if (dspace)
 	{
-	    ddata = swaplong (xtcc.dlen);
+	    ddata = dspace;
 	}
-	rewind (fp);
-#else
+	else
 	{
+#ifndef __QDOS__
+	    XTCC xtcc;
+	    long pos = ftell (fp);
+	    fseek (fp, -8, SEEK_END);
+	    if (fread (&xtcc, 1, 8, fp) == 8 &&
+		memcmp (xtcc.x.xtcc, "XTcc", 4) == 0)
+	    {
+		ddata = swaplong (xtcc.dlen);
+	    }
+	    fseek (fp, pos, SEEK_SET);
+#else
 	    struct qdirect qd;
 	    if (fs_headr (fgetchid (fp), -1, &qd, sizeof (qd)) >= 0)
 	    {
 		ddata = qd.d_datalen;
 	    }
-	}
 #endif
+	}
 	for (nr = -1, off = sizeof (QLDIR), c = 0; nr != 0;)
 	{
 	    ilen = qxl->h.sectc - off;
+	    if (rem >= 0 && ilen > rem)
+		ilen = rem;
 	    if ((nr = fread (buf + off, 1, ilen, fp)) > 0)
 	    {
 		c = getcluster (qxl, c);
@@ -1054,6 +1071,8 @@ static void makenewfile (QXL * qxl, char *fn1, QLDIR * ld, FILE * fp, time_t fti
 		write (qxl->fd, buf, nr + off);
 		off = 0;
 		nt += nr;
+		if (rem >= 0)
+		    rem -= nr;
 	    }
 	}
 	if (ddata)
@@ -1195,7 +1214,7 @@ static int qmkdir (QXL * qxl, short mflag, char **av)
 		    ld = qxl->curd;
 		}
 
-                makenewfile (qxl, wild, &ld, NULL, 0);
+                makenewfile (qxl, wild, &ld, NULL, 0, -1, 0);
 	    }
             if(*ocd)
             {
@@ -1212,147 +1231,611 @@ static int qmkdir (QXL * qxl, short mflag, char **av)
     return p == NULL;
 }
 
-static int qwrite (QXL * qxl, short mflag, char **av)
+/* Write flen bytes (all of it if flen < 0) from fp to the QXL file as
+   fn1, relative to the current directory, replacing any existing file.
+   src names the source for messages. ftm is a Unix time. dspace, if non
+   zero, is the data space for an executable (see makenewfile) */
+static int putfile (QXL * qxl, const char *src, char *fn1, FILE * fp,
+                    long flen, time_t ftm, uint32_t dspace)
 {
-    FILE *fp = NULL;
     QLDIR ld, dl, *d;
     long dlen = 0;
-    char *fn0, *fn1;
-
     int rv = -1;
-    char ntmp[40];
-    
-    if ((fn0 = *av) != NULL)
-    {
-        if ((qxl->mode & O_RDWR) == O_RDWR)
-        {
-            char ocd[40], nfil[40],*q;
-	    fn1 = *(av + 1);
-	    if (fn1 == NULL)
-	    {
-		char *p;
-#ifndef __QDOS__
-		p = strrchr (fn0, '/');
-		if (p == NULL)
-		{
-		    p = strrchr (fn0, '\\');
-		}
-		if (p)
-		    p++;
-		else
-		    p = fn0;
-#else
-		p = lastdir (fn0);
-#endif
-		fn1 = strcpy(ntmp, p);
-		for (p = fn1; *p; p++)
-		{
-		    if (*p == '.')
-			*p = '_';
-		}
-	    }
-            *ocd = 0;
-            if(qxl->curd.nlen)
-            {
-                memcpy(ocd, (char *)qxl->curd.name, qxl->curd.nlen);
-                *(ocd + qxl->curd.nlen) = 0;
-                q = stpcpy(nfil, ocd);
-                *q++ = '_';
-                strcpy(q, fn1);
-                fn1 = nfil;
-                qcd(qxl, 0, 0);
-            }
-            
-	    if ((d = find_file (qxl, fn1, 0, &qxl->curd, DO_RECURSE)) != NULL)
-	    {
-		if (d->type != 0xff)
-		{
-		    dlen = d->length;
-		    dl = qxl->lastd;
-		}
-		else
-		{
-		    dlen = -1;
-		    fprintf (stderr, "Can't overwrite directory \"%s\"\n",
-                             fn0);
-		}
-	    }
+    char ocd[40], nfil[40], *q;
 
-	    if (dlen >= 0)
-	    {
-		char *mode;
-		qxl->lastd = qxl->root;
-		find_file (qxl, fn1, 0xff, &qxl->curd, DO_RECURSE | DO_BEST);
-		ld = qxl->lastd;
-		if (ld.nlen == 0)
-		{
-		    ld = qxl->curd;
-		}
-                if(mflag & QX_ARGV0_IS_FP)
-                {
-                    fp = (FILE *)(*av);
-                }
-                else
-                {
-                    mode = (mflag & QX_TEXT) ? "r" : "rb";
-                    fp = fopen (fn0, mode);                    
-                }
-                
-		if (fp != NULL)
-		{
-		    struct stat st;
-                    int need;
-                    
-		    fstat (fileno (fp), &st);
-                    need = ((sizeof (QLDIR) + (long)st.st_size) - dlen) /
-                        qxl->h.sectc;
-                    
-		    if (need > (qxl->h.free - 1))
-		    {
-			fprintf (stderr,
-                                 "%s %d No room (%d free sectors, %ld b wanted %d)\n",
-                                 fn0, qxl->h.sectc,
-                                 qxl->h.free,
-                                 (long) (st.st_size + sizeof (QLDIR)),
-                                 need
-                                 );
-		    }
-		    else
-		    {
-                        time_t ftm;
-                        
-			if (d)
-			{
-			    qxl->lastd = dl;
-			    rmfile (qxl, d);
-			}
-                        ftm = (mflag & QX_ARGV0_IS_FP)
-                            ? (time_t)(uintptr_t)av[2] : st.st_ctime;
-                        ftm  += UNIX2QL;
-			makenewfile (qxl, fn1, &ld, fp, ftm);
-		    }
-                    rv = 0;
-		}
-		else
-		    perror (fn0);
-	    }
-	    if (d)
-		free (d);
-            if(*ocd)
-            {
-                q = ocd;
-                qcd(qxl, 0, &q);
-            }
-	}
+    if ((qxl->mode & O_RDWR) != O_RDWR)
+    {
+        fputs ("read only filesystem\n", stderr);
+        return -1;
+    }
+
+    *ocd = 0;
+    if(qxl->curd.nlen)
+    {
+        memcpy(ocd, (char *)qxl->curd.name, qxl->curd.nlen);
+        *(ocd + qxl->curd.nlen) = 0;
+        q = stpcpy(nfil, ocd);
+        *q++ = '_';
+        strcpy(q, fn1);
+        fn1 = nfil;
+        qcd(qxl, 0, 0);
+    }
+
+    if ((d = find_file (qxl, fn1, 0, &qxl->curd, DO_RECURSE)) != NULL)
+    {
+        if (d->type != 0xff)
+        {
+            dlen = d->length;
+            dl = qxl->lastd;
+        }
         else
         {
-            fputs ("read only filesystem\n", stderr);
+            dlen = -1;
+            fprintf (stderr, "Can't overwrite directory \"%s\"\n", src);
         }
     }
-    if(fp) fclose (fp);
+
+    if (dlen >= 0)
+    {
+        long size;
+        int need;
+
+        qxl->lastd = qxl->root;
+        find_file (qxl, fn1, 0xff, &qxl->curd, DO_RECURSE | DO_BEST);
+        ld = qxl->lastd;
+        if (ld.nlen == 0)
+        {
+            ld = qxl->curd;
+        }
+
+        if (flen < 0)
+        {
+            struct stat st;
+            fstat (fileno (fp), &st);
+            size = (long) st.st_size;
+        }
+        else
+            size = flen;
+
+        need = ((sizeof (QLDIR) + size) - dlen) / qxl->h.sectc;
+
+        if (need > (qxl->h.free - 1))
+        {
+            fprintf (stderr,
+                     "%s %d No room (%d free sectors, %ld b wanted %d)\n",
+                     src, qxl->h.sectc,
+                     qxl->h.free,
+                     (long) (size + sizeof (QLDIR)),
+                     need
+                );
+        }
+        else
+        {
+            if (d)
+            {
+                qxl->lastd = dl;
+                rmfile (qxl, d);
+            }
+            makenewfile (qxl, fn1, &ld, fp, ftm + UNIX2QL, flen, dspace);
+            rv = 0;
+        }
+    }
+    if (d)
+        free (d);
+    if(*ocd)
+    {
+        q = ocd;
+        qcd(qxl, 0, &q);
+    }
     return rv;
 }
 
+static int qwrite (QXL * qxl, short mflag, char **av)
+{
+    FILE *fp;
+    char *fn0, *fn1;
+    char ntmp[40];
+
+    if ((fn0 = *av) == NULL)
+        return -1;
+
+    if ((qxl->mode & O_RDWR) != O_RDWR)
+    {
+        fputs ("read only filesystem\n", stderr);
+        return 0;
+    }
+
+    fn1 = *(av + 1);
+    if (fn1 == NULL)
+    {
+        char *p;
+#ifndef __QDOS__
+        p = strrchr (fn0, '/');
+        if (p == NULL)
+        {
+            p = strrchr (fn0, '\\');
+        }
+        if (p)
+            p++;
+        else
+            p = fn0;
+#else
+        p = lastdir (fn0);
+#endif
+        fn1 = strcpy(ntmp, p);
+        for (p = fn1; *p; p++)
+        {
+            if (*p == '.')
+                *p = '_';
+        }
+    }
+
+    if ((fp = fopen (fn0, (mflag & QX_TEXT) ? "r" : "rb")) == NULL)
+    {
+        perror (fn0);
+        return -1;
+    }
+    else
+    {
+        struct stat st;
+        int rv;
+        fstat (fileno (fp), &st);
+        rv = putfile (qxl, fn0, fn1, fp, -1, st.st_ctime, 0);
+        fclose (fp);
+        return rv;
+    }
+}
+
+/*------------------------------------------------------------------.
+| unzip : extract a (native) zip file into the current QXL directory |
+|                                                                    |
+| Handles stored and deflated (via zlib) entries. Executables get    |
+| their data space from the QDOS/SMS extra field in the zip, or      |
+| failing that from an XTcc trailer on the data (which is removed).  |
+`------------------------------------------------------------------*/
+
+#define ZBUFSIZ 16384
+
+/* Copy csize bytes of zip entry data from zf to tf, inflating it if
+   method is 8 (deflate). Returns 0 on success, with the uncompressed
+   length and CRC in *ulen and *crc, -1 for bad data, -2 if tf could not
+   be written */
+static int zip_copy (FILE * zf, FILE * tf, uint32_t method, uint32_t csize,
+		     uint32_t * ulen, uint32_t * crc)
+{
+    u_char *ibuf, *obuf;
+    z_stream zs;
+    int rv = 0, zrv = Z_OK;
+    size_t n;
+
+    *ulen = 0;
+    *crc = crc32 (0L, Z_NULL, 0);
+    ibuf = malloc (ZBUFSIZ);
+    obuf = malloc (ZBUFSIZ);
+    memset (&zs, 0, sizeof (zs));
+
+    if (ibuf == NULL || obuf == NULL ||
+	(method == 8 && inflateInit2 (&zs, -MAX_WBITS) != Z_OK))
+    {
+	fputs ("Out of memory\n", stderr);
+	free (ibuf);
+	free (obuf);
+	return -1;
+    }
+
+    while (rv == 0 && zrv != Z_STREAM_END)
+    {
+	/* Refill the input */
+	if (zs.avail_in == 0 && csize)
+	{
+	    n = (csize < ZBUFSIZ) ? csize : ZBUFSIZ;
+	    if (fread (ibuf, 1, n, zf) != n)
+	    {
+		rv = -1;
+		break;
+	    }
+	    csize -= n;
+	    zs.next_in = ibuf;
+	    zs.avail_in = n;
+	}
+
+	if (method == 8)
+	{
+	    zs.next_out = obuf;
+	    zs.avail_out = ZBUFSIZ;
+	    zrv = inflate (&zs, Z_NO_FLUSH);
+	    if (zrv != Z_OK && zrv != Z_STREAM_END)
+	    {
+		rv = -1;	/* corrupt, or truncated (Z_BUF_ERROR) */
+		break;
+	    }
+	    n = ZBUFSIZ - zs.avail_out;
+	}
+	else
+	{
+	    if (zs.avail_in == 0)
+		break;		/* all copied */
+	    memcpy (obuf, zs.next_in, zs.avail_in);
+	    n = zs.avail_in;
+	    zs.avail_in = 0;
+	}
+
+	if (n)
+	{
+	    if (fwrite (obuf, 1, n, tf) != n)
+		rv = -2;
+	    *crc = crc32 (*crc, obuf, n);
+	    *ulen += n;
+	}
+    }
+
+    if (method == 8)
+	inflateEnd (&zs);
+    free (ibuf);
+    free (obuf);
+    return rv;
+}
+
+static uint32_t zrd16 (const u_char * p)
+{
+    return (uint32_t) p[0] | ((uint32_t) p[1] << 8);
+}
+
+static uint32_t zrd32 (const u_char * p)
+{
+    return zrd16 (p) | (zrd16 (p + 2) << 16);
+}
+
+static uint32_t berd32 (const u_char * p)
+{
+    return ((uint32_t) p[0] << 24) | ((uint32_t) p[1] << 16) |
+	((uint32_t) p[2] << 8) | (uint32_t) p[3];
+}
+
+/* Look for the QDOS/SMS extra field (ID 0xfb4a) in a zip extra block.
+   Info-ZIP writes it in one of two forms, each followed by the 64 byte
+   (big endian) QDOS file header:
+     "QDOS02\0\0" + header
+     "QZHD"       + header   (Jonathan Hudson's QDOS zip)
+   The type is at header offset 5 and the data space at offset 6 */
+static int zip_qdosextra (const u_char * x, long xlen, int *type,
+			  uint32_t * dspace)
+{
+    while (xlen >= 4)
+    {
+	uint32_t id = zrd16 (x);
+	long sz = zrd16 (x + 2);
+	const u_char *d = x + 4;
+	long off = -1;
+
+	if (sz > xlen - 4)
+	    break;
+	if (id == 0xfb4a || id == 0x4afb)
+	{
+	    if (sz >= 4 && memcmp (d, "QZHD", 4) == 0)
+		off = 4;
+	    else if (sz >= 8 && memcmp (d, "QDOS", 4) == 0)
+		off = 8;
+	    if (off >= 0 && sz >= off + 10)
+	    {
+		*type = d[off + 5];
+		*dspace = berd32 (d + off + 6);
+		return 1;
+	    }
+	}
+	x += 4 + sz;
+	xlen -= 4 + sz;
+    }
+    return 0;
+}
+
+/* Unix modification time from an extended timestamp (0x5455) field */
+static int zip_utime (const u_char * x, long xlen, time_t * t)
+{
+    while (xlen >= 4)
+    {
+	uint32_t id = zrd16 (x);
+	long sz = zrd16 (x + 2);
+
+	if (sz > xlen - 4)
+	    break;
+	if (id == 0x5455 && sz >= 5 && (x[4] & 1))
+	{
+	    *t = (time_t) (int32_t) zrd32 (x + 5);
+	    return 1;
+	}
+	x += 4 + sz;
+	xlen -= 4 + sz;
+    }
+    return 0;
+}
+
+/* Make QDOS directory qname[0..len) (relative to the current
+   directory) unless it already exists */
+static void zip_mkdir (QXL * qxl, const char *qname, int len)
+{
+    char dn[QLPATH_MAX + 1], *p = dn;
+    QLDIR *d;
+
+    memcpy (dn, qname, len);
+    dn[len] = 0;
+    if ((d = find_file (qxl, dn, 0xff, &qxl->curd, DO_RECURSE)) != NULL)
+    {
+	free (d);
+    }
+    else
+    {
+	fprintf (qxl->fp, "  creating: %s\n", dn);
+	qmkdir (qxl, 0, &p);
+    }
+}
+
+/* Extract the entry described by central directory record ce */
+static int zip_extract (QXL * qxl, FILE * zf, const u_char * ce)
+{
+    char zname[256], qname[QLPATH_MAX + 1], sep[QLPATH_MAX + 1];
+    u_char lh[30], *lx = NULL;
+    uint32_t flags, method, crc, csize, usize, nlen, xlen, lhoff, lxlen;
+    uint32_t dspace = 0;
+    int isdir, qtype = 0, gotq, k, pre, rv = -1;
+    long flen;
+    const u_char *cx;
+    char *s;
+    time_t ftm;
+    FILE *tf;
+    uint32_t ulen, ucrc;
+    int zrv;
+
+    flags = zrd16 (ce + 8);
+    method = zrd16 (ce + 10);
+    crc = zrd32 (ce + 16);
+    csize = zrd32 (ce + 20);
+    usize = zrd32 (ce + 24);
+    nlen = zrd16 (ce + 28);
+    xlen = zrd16 (ce + 30);
+    lhoff = zrd32 (ce + 42);
+    cx = ce + 46 + nlen;
+
+    if (nlen >= sizeof (zname))
+	nlen = sizeof (zname) - 1;
+    memcpy (zname, ce + 46, nlen);
+    zname[nlen] = 0;
+
+    /* QDOS name : directory separators and '.' become '_' */
+    isdir = (nlen && zname[nlen - 1] == '/');
+    pre = (qxl->curd.nlen) ? qxl->curd.nlen + 1 : 0;
+    for (s = zname; *s == '/'; s++)
+	;
+    for (k = 0; *s && !(isdir && s[1] == 0); s++)
+    {
+	if (k + pre >= QLPATH_MAX)
+	{
+	    fprintf (stderr, "%s: name too long for QDOS, skipped\n", zname);
+	    return -1;
+	}
+	sep[k] = (*s == '/' || *s == '\\');
+	qname[k] = (sep[k] || *s == '.') ? '_' : *s;
+	k++;
+    }
+    qname[k] = 0;
+    if (k == 0)
+	return 0;
+
+    /* Create any directories in the path */
+    for (pre = 0; pre < k; pre++)
+    {
+	if (sep[pre])
+	    zip_mkdir (qxl, qname, pre);
+    }
+    if (isdir)
+    {
+	zip_mkdir (qxl, qname, k);
+	return 0;
+    }
+
+    if (flags & 1)
+    {
+	fprintf (stderr, "%s: encrypted, skipped\n", zname);
+	return -1;
+    }
+    if (method != 0 && method != 8)
+    {
+	fprintf (stderr, "%s: compression method %d not supported, skipped\n",
+		 zname, (int) method);
+	return -1;
+    }
+    if (csize == 0xffffffffUL || usize == 0xffffffffUL ||
+	lhoff == 0xffffffffUL)
+    {
+	fprintf (stderr, "%s: zip64 not supported, skipped\n", zname);
+	return -1;
+    }
+
+    /* Local header, and its extra field, which may hold the QDOS header */
+    if (fseek (zf, (long) lhoff, SEEK_SET) != 0 ||
+	fread (lh, 1, 30, zf) != 30 || zrd32 (lh) != 0x04034b50UL)
+    {
+	fprintf (stderr, "%s: bad local header, skipped\n", zname);
+	return -1;
+    }
+    lxlen = zrd16 (lh + 28);
+    fseek (zf, (long) zrd16 (lh + 26), SEEK_CUR);
+    if (lxlen)
+    {
+	lx = malloc (lxlen);
+	if (lx == NULL || fread (lx, 1, lxlen, zf) != lxlen)
+	{
+	    fprintf (stderr, "%s: bad local header, skipped\n", zname);
+	    free (lx);
+	    return -1;
+	}
+    }
+
+    gotq = zip_qdosextra (cx, xlen, &qtype, &dspace);
+    if (!gotq && lx)
+	gotq = zip_qdosextra (lx, lxlen, &qtype, &dspace);
+    if (!zip_utime (cx, xlen, &ftm) && !(lx && zip_utime (lx, lxlen, &ftm)))
+    {
+	struct tm tm;
+	uint32_t dt = zrd16 (ce + 12), dd = zrd16 (ce + 14);
+
+	memset (&tm, 0, sizeof (tm));
+	tm.tm_sec = (dt & 0x1f) * 2;
+	tm.tm_min = (dt >> 5) & 0x3f;
+	tm.tm_hour = dt >> 11;
+	tm.tm_mday = dd & 0x1f;
+	tm.tm_mon = ((dd >> 5) & 0x0f) - 1;
+	tm.tm_year = (dd >> 9) + 80;
+	tm.tm_isdst = -1;
+	ftm = mktime (&tm);
+    }
+
+    if ((tf = tmpfile ()) == NULL)
+    {
+	perror ("tmpfile");
+	free (lx);
+	return -1;
+    }
+
+    zrv = zip_copy (zf, tf, method, csize, &ulen, &ucrc);
+    if (zrv != 0 || ulen != usize || ucrc != crc)
+    {
+	fprintf (stderr, "%s: bad zip data (%s), skipped\n", zname,
+		 (zrv == -2) ? "write error" : "CRC or length");
+    }
+    else
+    {
+	const char *how = "";
+
+	flen = (long) usize;
+	if (gotq)
+	{
+	    /* QDOS header in the zip is definitive */
+	    if (qtype != 1)
+		dspace = 0;
+	    how = " (QDOS extra field)";
+	}
+	else if (usize >= 8)
+	{
+	    u_char t[8];
+
+	    fseek (tf, flen - 8, SEEK_SET);
+	    if (fread (t, 1, 8, tf) == 8 && memcmp (t, "XTcc", 4) == 0)
+	    {
+		dspace = berd32 (t + 4);
+		flen -= 8;	/* the trailer is not part of the file */
+		how = " (XTcc trailer)";
+	    }
+	}
+
+	rewind (tf);
+	if ((rv = putfile (qxl, zname, qname, tf, flen, ftm, dspace)) == 0)
+	{
+	    fprintf (qxl->fp, "  %s: %s -> %s", (method == 8) ?
+		     "inflating" : "extracting", zname, qname);
+	    if (dspace)
+		fprintf (qxl->fp, " [data space %" PRIu32 "%s]", dspace, how);
+	    fputc ('\n', qxl->fp);
+	}
+    }
+    fclose (tf);
+    free (lx);
+    return rv;
+}
+
+static int qunzip (QXL * qxl, short mflag, char **av)
+{
+    char *zfn = *av;
+    FILE *zf;
+    u_char *buf = NULL, *cd = NULL, *p, *e;
+    long zsize, n;
+    uint32_t cdoff, cdsize, nent, i;
+    int nok = 0, nbad = 0;
+
+    if (zfn == NULL)
+	return -1;
+
+    if ((qxl->mode & O_RDWR) != O_RDWR)
+    {
+	fputs ("read only filesystem\n", stderr);
+	return 0;
+    }
+
+    if ((zf = fopen (zfn, "rb")) == NULL)
+    {
+	perror (zfn);
+	return 0;
+    }
+
+    /* Find the end of central directory record, allowing for a comment */
+    fseek (zf, 0, SEEK_END);
+    zsize = ftell (zf);
+    n = (zsize < 65535 + 22) ? zsize : 65535 + 22;
+    p = NULL;
+    if (n >= 22 && (buf = malloc (n)) != NULL &&
+	fseek (zf, zsize - n, SEEK_SET) == 0 &&
+	fread (buf, 1, n, zf) == (size_t) n)
+    {
+	for (p = buf + n - 22; p >= buf; p--)
+	{
+	    if (zrd32 (p) == 0x06054b50UL)
+		break;
+	}
+	if (p < buf)
+	    p = NULL;
+    }
+
+    if (p == NULL)
+    {
+	fprintf (stderr, "%s: not a zip file\n", zfn);
+    }
+    else
+    {
+	nent = zrd16 (p + 10);
+	cdsize = zrd32 (p + 12);
+	cdoff = zrd32 (p + 16);
+
+	if (cdoff == 0xffffffffUL || cdsize == 0xffffffffUL)
+	{
+	    fprintf (stderr, "%s: zip64 not supported\n", zfn);
+	}
+	else if ((cd = malloc (cdsize + 1)) == NULL ||
+		 fseek (zf, (long) cdoff, SEEK_SET) != 0 ||
+		 fread (cd, 1, cdsize, zf) != cdsize)
+	{
+	    fprintf (stderr, "%s: can't read zip directory\n", zfn);
+	}
+	else
+	{
+	    for (p = cd, e = cd + cdsize, i = 0; i < nent; i++)
+	    {
+		if (e - p < 46 || zrd32 (p) != 0x02014b50UL ||
+		    e - p < 46 + (long) (zrd16 (p + 28) + zrd16 (p + 30) +
+					 zrd16 (p + 32)))
+		{
+		    fprintf (stderr, "%s: corrupt zip directory\n", zfn);
+		    nbad++;
+		    break;
+		}
+		if (zip_extract (qxl, zf, p) == 0)
+		    nok++;
+		else
+		    nbad++;
+		p += 46 + zrd16 (p + 28) + zrd16 (p + 30) + zrd16 (p + 32);
+	    }
+	    fprintf (qxl->fp, "%s: %d entr%s extracted\n", zfn, nok,
+		     (nok == 1) ? "y" : "ies");
+	    if (nbad)
+		fprintf (stderr, "%s: %d entr%s not extracted\n", zfn, nbad,
+			 (nbad == 1) ? "y" : "ies");
+	}
+    }
+
+    free (cd);
+    free (buf);
+    fclose (zf);
+    return 0;
+}
 
 static int version (QXL * qxl, short mflag, char **av)
 {
@@ -1816,21 +2299,26 @@ static intptr_t clone_cb (QXL * sqxl, QLDIR * d, void *q, void *pb, u_short c)
         }
         else /*if (flen > 0)*/
         {
-            char *args[3];
+            FILE *ofp;
             p = (char *)sqxl->tmpd.name;
             nfn = strlen(p);
             if(nfn && *(d->name+nfn) == '_') nfn++;
             p = strcat(df, p);
 
-           sqxl->fp = tmpfile();
-           cpfile(sqxl, d);
-           rewind(sqxl->fp);
-           qcd(dqxl, 0, 0);
-           qcd(dqxl, 0, &p);
-           args[0] = (char *)sqxl->fp;
-           args[1] = (char *)d->name + nfn; // cast for c68, alas
-           args[2] = (char *)(uintptr_t)d->date;
-           qwrite(dqxl, (short)QX_ARGV0_IS_FP, args);
+           ofp = sqxl->fp;
+           if ((sqxl->fp = tmpfile()) != NULL)
+           {
+               cpfile(sqxl, d);
+               rewind(sqxl->fp);
+               qcd(dqxl, 0, 0);
+               qcd(dqxl, 0, &p);
+               putfile(dqxl, (char *)d->name, (char *)d->name + nfn,
+                       sqxl->fp, -1, d->date, (d->type == 1) ? d->data : 0);
+               fclose(sqxl->fp);
+           }
+           else
+               perror("tmpfile");
+           sqxl->fp = ofp;
         }
     }
     return 0;
@@ -2032,6 +2520,7 @@ static JTBL jtbl[] =
     {"exit", quit},
     {"init", qinit, QX_OPEN},
     {"wr", qwrite, QX_OPEN},
+    {"unzip", qunzip, QX_OPEN},
     {"rmdir", qrmdir, QX_OPEN},
     {"rm", qrm, QX_OPEN},
     {"mkdir", qmkdir, QX_OPEN},

@@ -15,6 +15,12 @@ AS_IF([test -f ../qxltool.c], [],
 dnl Checks for libraries.
 AC_SEARCH_LIBS([floor], [m])
 
+dnl zlib is required, for the unzip command
+AC_CHECK_HEADER([zlib.h], [],
+	[AC_MSG_ERROR([zlib.h not found, please install zlib (development files)])])
+AC_SEARCH_LIBS([inflateInit2_], [z], [],
+	[AC_MSG_ERROR([zlib not found, please install zlib])])
+
 dnl readline: some distributions need termcap/ncurses linked explicitly
 AC_ARG_WITH([readline],
 	[AS_HELP_STRING([--without-readline], [do not use GNU readline])],

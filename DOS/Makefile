@@ -11,10 +11,13 @@ DCC = gcc-go32
 # These options are mainly for Unix 
 DEFS = -DHAVE_CONFIG_H
 
+# zlib is needed for the unzip command
+LIBS = -lz
+
 CFLAGS = -O3 -Wall -s -I. -I$(VPATH)  
 
 qxltool: qxltool.o version.h
-	$(DCC) -s -o qxltool qxltool.o
+	$(DCC) -s -o qxltool qxltool.o $(LIBS)
 	rm qxltool
 
 qxltool.o : qxltool.c qxltool.h version.h

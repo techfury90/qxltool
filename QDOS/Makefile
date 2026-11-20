@@ -9,10 +9,12 @@ VPATH = ../
 DEFS = -DHAVE_CONFIG_H
 
 QCC = qdos-gcc
+# zlib is needed for the unzip command
+LIBS = -lz -lm
 QFLAGS = -O2 -I. -I$(VPATH) $(DEFS)
 
 qxltool: qxltool.o
-	$(QCC) $(QFLAGS) -o qxltool qxltool.o -lm
+	$(QCC) $(QFLAGS) -o qxltool qxltool.o $(LIBS)
 	ls -l qxltool
 	qcp qxltool /ql/exe/qxltool
 

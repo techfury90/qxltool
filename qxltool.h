@@ -159,5 +159,4 @@ typedef struct
 #define QX_TEXT    (1 << 0)
 #define QX_OPEN    (1 << 1)
 #define QX_FAIL_SILENTLY (1 << 14)
-#define QX_ARGV0_IS_FP (1 << 15)
 #endif
