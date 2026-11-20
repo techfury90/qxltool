@@ -56,11 +56,16 @@ static u_short nextcluster (QXL *, u_short, short);
 static void updatecluster (QXL *, u_short, u_short);
 
 #ifndef HAVE_STPCPY
-char *stpcpy (char *s1, char *s2)
+/* Must not be called stpcpy: GCC recognises strcpy+strlen as the stpcpy
+   idiom and turns the body into a call to stpcpy, i.e. itself, giving an
+   infinite loop (seen with mingw, which lacks stpcpy). */
+static char *qxl_stpcpy (char *s1, const char *s2)
 {
-    strcpy (s1, s2);
-    return s1 + strlen (s1);
+    size_t n = strlen (s2);
+    memcpy (s1, s2, n + 1);
+    return s1 + n;
 }
+# define stpcpy qxl_stpcpy
 #endif
 
 
@@ -1308,7 +1313,7 @@ static int qwrite (QXL * qxl, short mflag, char **av)
                                  "%s %d No room (%d free sectors, %ld b wanted %d)\n",
                                  fn0, qxl->h.sectc,
                                  qxl->h.free,
-                                 (long) st.st_size + sizeof (QLDIR),
+                                 (long) (st.st_size + sizeof (QLDIR)),
                                  need
                                  );
 		    }
