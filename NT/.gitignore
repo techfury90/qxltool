@@ -1,0 +1,8 @@
+# Ignore everything in this directory (build artifacts)
+*
+# Except this file
+!.gitignore
+# And the Windows support sources
+!fnmatch.c
+!getopt.c
+!getopt.h
