@@ -1,0 +1,167 @@
+name: Build and Upload Tagged Release
+
+on:
+  push:
+    tags:
+      - "**"
+    branches:
+      - main
+  pull_request:
+
+env:
+  GIT_PAGER:
+
+jobs:
+  get_release_name:
+    name: Get Release Name
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          filter: "blob:none"
+          fetch-tags: "false"
+          fetch-depth: "1000"
+          submodules: "true"
+      - name: Define Release Name
+        id: DefineName
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "RELEASE_NAME=$GITHUB_REFNAME" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF_NAME" == "master" ]]; then
+            echo "RELEASE_NAME=latest" >> "$GITHUB_OUTPUT"
+            git tag -f latest
+            git push origin -f latest
+          else
+            echo "RELEASE_NAME=latest" >> "$GITHUB_OUTPUT"
+          fi
+    outputs:
+      RELEASE_NAME: ${{ steps.DefineName.outputs.RELEASE_NAME }}
+
+  build:
+    strategy:
+      matrix:
+        include:
+          - {
+              os: ubuntu,
+              image: ubuntu-24.04,
+              pkg: apt,
+              arch: x86_64,
+              shell: bash,
+              dir: Unix,
+              ext: "",
+            }
+          - {
+              os: ubuntu,
+              image: ubuntu-24.04-arm,
+              pkg: apt,
+              arch: aarch64,
+              shell: bash,
+              dir: Unix,
+              ext: "",
+            }
+          - {
+              os: macos,
+              image: macos-15,
+              pkg: brew,
+              arch: aarch64,
+              shell: bash,
+              dir: Unix,
+              ext: "",
+            }
+          - {
+              os: mingw64,
+              image: windows-2022,
+              pkg: mingw,
+              arch: x86_64,
+              shell: "msys2 {0}",
+              dir: NT,
+              ext: ".exe",
+            }
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    name: Build ${{ matrix.os }} for ${{ matrix.arch }}
+    runs-on: ${{ matrix.image }}
+    needs:
+      - get_release_name
+    env:
+      RELEASE_NAME: ${{needs.get_release_name.outputs.RELEASE_NAME}}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          filter: "blob:none"
+          fetch-tags: "false"
+          fetch-depth: "1000"
+          submodules: "true"
+      - name: Install Dependencies - apt
+        if: ${{ matrix.pkg == 'apt' }}
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            cmake \
+            git \
+            zlib1g-dev
+      - name: Install Dependencies - msys2
+        uses: msys2/setup-msys2@v2
+        if: ${{ matrix.pkg == 'mingw' }}
+        with:
+          msystem: ${{ matrix.os }}
+          update: true
+          install: >-
+            git
+            make
+            zip
+            mingw-w64-${{matrix.arch}}-cc
+            mingw-w64-${{matrix.arch}}-zlib
+      - name: Install Dependencies - brew
+        if: ${{ matrix.pkg == 'brew' }}
+        run: |
+          brew install zlib
+      - name: Configure
+        run: |
+          cd ${{ matrix.dir }}
+          ../configure
+      - name: Build
+        run: |
+          cd ${{ matrix.dir }}
+          make
+      - name: Create Artifact
+        run: |
+          cd ${{ matrix.dir }}
+          zip -r $GITHUB_WORKSPACE/qxltool-${{ matrix.arch }}-${{ matrix.os }}-${{ env.RELEASE_NAME }}.zip \
+                 qxltool${{ matrix.ext }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          retention-days: 1
+          name: qxltool-${{ matrix.arch }}-${{ matrix.os }}-${{ env.RELEASE_NAME }}
+          path: qxltool-${{ matrix.arch }}-${{ matrix.os }}-${{ env.RELEASE_NAME }}.zip
+
+  #### Upload artifacts to Releases
+  upload_artifacts:
+    name: Upload Artifacts to Releases
+    runs-on: ubuntu-24.04
+    needs:
+      - get_release_name
+      - build
+    env:
+      RELEASE_NAME: ${{ needs.get_release_name.outputs.RELEASE_NAME }}
+    steps:
+      - name: Restore Artifacts Cache
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: list Artifacts
+        run: |
+          ls -la artifacts/*/*
+      - name: Release ${{ env.RELEASE_NAME }}
+        uses: softprops/action-gh-release@v2
+        if: ${{ (github.ref_type == 'tag') || (github.ref_name == 'master') }}
+        with:
+          make_latest: true
+          generate_release_notes: true
+          append_body: false
+          name: ${{ env.RELEASE_NAME }}
+          tag_name: ${{ env.RELEASE_NAME }}
+          files: |
+            artifacts/*/*.zip
