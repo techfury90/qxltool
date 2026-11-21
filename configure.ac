@@ -12,6 +12,9 @@ dnl compiling (e.g. building the NT version with mingw)
 AS_IF([test -f ../qxltool.c], [],
 	[AC_MSG_ERROR([You must run this in the Unix or NT sub-directory])])
 
+dnl Test library availability with the same static linkage used by the NT build.
+AS_CASE([`pwd`], [*/NT], [LDFLAGS="$LDFLAGS -static"])
+
 dnl Checks for libraries.
 AC_SEARCH_LIBS([floor], [m])
 

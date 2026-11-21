@@ -3605,6 +3605,12 @@ else case e in #(
 esac
 fi
 
+case `pwd` in #(
+  */NT) :
+    LDFLAGS="$LDFLAGS -static" ;; #(
+  *) :
+     ;;
+esac
 
 { printf '%s\n' "$as_me:${as_lineno-$LINENO}: checking for library containing floor" >&5
 printf %s "checking for library containing floor... " >&6; }

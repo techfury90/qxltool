@@ -3,12 +3,13 @@ top_srcdir = @top_srcdir@
 VPATH =  @top_srcdir@
 LIBS = @LIBS@
 CFLAGS = @CFLAGS@ -I. -I$(srcdir) -Wall
+LDFLAGS = @LDFLAGS@
 CC=@CC@
 DEFS=@DEFS@
 EXEEXT=@EXEEXT@
 
 qxltool: qxltool.o
-	$(CC) $(CFLAGS) -o qxltool qxltool.o $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o qxltool qxltool.o $(LIBS)
 
 qxltool.o: $(srcdir)/qxltool.c $(srcdir)/qxltool.h config.h $(srcdir)/version.h
 	$(CC) $(CFLAGS) $(DEFS) -c $(srcdir)/qxltool.c
